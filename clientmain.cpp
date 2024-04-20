@@ -39,6 +39,7 @@ int main(int argc, char *argv[]){
   char** tokens;
   FILE *fptr;
   
+  //check out the number of the argc
   if (argc < 4 || argc >5 ) {
 
     fprintf(stderr,"usage: %s <HOSTNAME:PORT> <CLIENTs> <prob> <resultfile> [debug] \n",argv[0]);
@@ -46,12 +47,15 @@ int main(int argc, char *argv[]){
       fprintf(fptr,"ERROR OCCURED");    
     exit(1);
   }
+  
+  //split input to each parameters.
   char delim[]=":";
   char *Desthost=strtok(argv[1],delim);
   char *Destport=strtok(NULL,delim);
   int noClients=atoi(argv[2]);
   int prob=atoi(argv[3]);
 
+  //check out the number of the clients that connected.
   if (noClients>=NOCL) {
     printf("Too many clients..Max is %d.\n", NOCL);
     printf("If you want more, change NOCL and recompile.\n");
@@ -75,6 +79,7 @@ int main(int argc, char *argv[]){
   
   printf("Connecting %d clients %s on port=%s \n",noClients,Desthost,Destport);
   printf("Saving to %s \n", argv[4]);
+  //open or create the file in "w+" mode.
   fptr = fopen(argv[4],"w+");
   if (fptr == NULL) {
     printf("Cant write to %s, %s.\n",argv[4], strerror(errno));
@@ -185,6 +190,7 @@ int main(int argc, char *argv[]){
   printf("\n-----RESPONSES to calcMessage (registration) ----- \n");
   
   for(int i=0;i<noClients;i++){
+    //receive data from sockfd[i] and store it into buffer
     if ((numbytes = recvfrom(sockfd[i], buffer, sizeof(buffer), 0,(struct sockaddr*)&their_addr,&addr_len)) == -1) {
       perror("recvfrom");
       if(fptr!=NULL)
