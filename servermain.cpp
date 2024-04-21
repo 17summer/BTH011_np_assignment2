@@ -11,12 +11,15 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
+#include <pthread.h>
 // Included to get the support library
 #include <calcLib.h>
 
 #include "protocol.h"
 
 #define MAXBUFLEN 100 
+
+const struct calcMessage PROTOCOL = {22, 0, 17,1,0};
 
 using namespace std;
 /* Needs to be global, to be rechable by callback and main */
@@ -49,6 +52,27 @@ void *get_in_addr(struct sockaddr *sa)
 	return &(((struct sockaddr_in6*)sa)->sin6_addr);
 }
 
+//use thread to handle several clients at a time
+void* handleclients(void* arg)
+{
+
+
+
+
+	return NULL;
+}
+
+bool compareProtocol(char* msg)
+{
+	struct calcMessage* info = (struct calcMessage*)msg;
+	
+	if(info->type != PROTOCOL.type || info->message != PROTOCOL.message || info->protocol != PROTOCOL.protocol ||
+	 info->major_version != PROTOCOL.major_version || info->minor_version != PROTOCOL.minor_version)
+	 { 	
+		return false;
+	 }
+	 return true;
+}
 
 int main(int argc, char *argv[]){
   
@@ -81,6 +105,10 @@ int main(int argc, char *argv[]){
 	printf("DEBUG:Desthost: %s and Port: %s \n",Desthost,Destport);
 #endif
 
+
+#ifdef DEBUG
+	printf("The info of supported protol:%u %u %u %u %u\n",PROTOCOL.type,PROTOCOL.message,PROTOCOL.protocol,PROTOCOL.major_version,PROTOCOL.minor_version);
+#endif
 	//create UDP socket and bind the address
 	int sockfd;
 	struct addrinfo hints, *servinfo, *p;
@@ -91,6 +119,8 @@ int main(int argc, char *argv[]){
 	struct sockaddr_in *the_addr;
 	char buf[MAXBUFLEN];
 	socklen_t addr_len;
+	addr_len = sizeof(their_addr);
+
 
 	memset(&hints, 0, sizeof hints);
 	hints.ai_family = AF_UNSPEC; // allow IPv4, IPv6 and DNS.
@@ -147,7 +177,28 @@ int main(int argc, char *argv[]){
 
 	freeaddrinfo(servinfo);
 
-
+	
+	//while(1)
+	//{
+		memset(buf,0,sizeof(buf));
+	
+		
+		if((numbytes=recvfrom(sockfd,buf,MAXBUFLEN-1,0,(struct sockaddr*)&their_addr,&addr_len)) == -1){
+			perror("recv:error\n");
+			exit(1);
+		}else
+		//{
+			 buf[numbytes] = '\0'; // Ensure null termination
+			 printf("size of msg: %.*s\n", numbytes, buf);
+		
+			//printf("size of msg: %s\n",buf);
+		//}
+	printf("number of bytes: %d.\n",numbytes);
+	
+	
+	//}
+	struct calcMessage* temp = (struct calcMessage*) buf;
+	printf("The msg of protocol:%u %u %u %u %u\n",temp->type,temp->message,temp->protocol,temp->major_version,temp->minor_version);
 
 
 	/* 
