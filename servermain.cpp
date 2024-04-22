@@ -19,13 +19,14 @@
 
 #define MAXBUFLEN 100 
 
-const struct calcMessage PROTOCOL = {22, 0, 17,1,0};
+const struct calcMessage PROTOCOL = {22, 0, 17, 1, 0};
 
 using namespace std;
 /* Needs to be global, to be rechable by callback and main */
 int loopCount=0;
 int terminate=0;
 
+static int clientID = 1;
 
 /* Call back function, will be called when the SIGALRM is raised when the timer expires. */
 void checkJobbList(int signum){
@@ -64,14 +65,47 @@ void* handleclients(void* arg)
 
 bool compareProtocol(char* msg)
 {
-	struct calcMessage* info = (struct calcMessage*)msg;
+	struct calcMessage info;
+
+	memset(&info,0,sizeof(info));
 	
-	if(info->type != PROTOCOL.type || info->message != PROTOCOL.message || info->protocol != PROTOCOL.protocol ||
-	 info->major_version != PROTOCOL.major_version || info->minor_version != PROTOCOL.minor_version)
+	memcpy(&info,msg,sizeof(info));
+	
+	info.type = ntohs(info.type);
+	info.message = ntohl(info.message);
+	info.protocol = ntohs(info.protocol);
+	info.major_version = ntohs(info.major_version);
+	info.minor_version = ntohs(info.minor_version);
+	
+	printf("The msg of protocol:%u %u %u %u %u\n",info.type,info.message,info.protocol,info.major_version,info.minor_version);
+	
+	if(info.type != PROTOCOL.type || info.message != PROTOCOL.message || info.protocol != PROTOCOL.protocol ||
+	 info.major_version != PROTOCOL.major_version || info.minor_version != PROTOCOL.minor_version)
 	 { 	
 		return false;
 	 }
 	 return true;
+}
+
+void sendCalcMsg(int sockfd,struct sockaddr_storage their)
+{
+	calcMessage msg;
+	msg.type = htons(2);
+	msg.message = htons(2);
+	msg.major_version = htons(1);
+	msg.minor_version = htons(0);
+	
+	struct sockaddr_storage their_addr = their;
+	socklen_t addr_len;
+	addr_len = sizeof(their_addr);
+
+	int numbytes;
+
+	if((numbytes = sendto(sockfd,&msg,sizeof(msg),0,(struct sockaddr*)&their_addr,addr_len))==-1)
+	{
+		perror("talker:sendto.");
+	}
+		
 }
 
 int main(int argc, char *argv[]){
@@ -186,20 +220,32 @@ int main(int argc, char *argv[]){
 		if((numbytes=recvfrom(sockfd,buf,MAXBUFLEN-1,0,(struct sockaddr*)&their_addr,&addr_len)) == -1){
 			perror("recv:error\n");
 			exit(1);
+		}
+
+		//Check if the protocol matches
+		if(!compareProtocol(buf))
+		{
+			sendCalcMsg(sockfd,their_addr);	
 		}else
-		//{
-			 buf[numbytes] = '\0'; // Ensure null termination
-			 printf("size of msg: %.*s\n", numbytes, buf);
-		
-			//printf("size of msg: %s\n",buf);
-		//}
-	printf("number of bytes: %d.\n",numbytes);
-	
+		{
+			struct calcProtocol proto;	
+			proto.type = htons(1);
+			proto.major_version = htons(1);
+			proto.minor_version = htons(0);
+			proto.id = htons(clientID++);
+			proto.arith = htons(randomType());
+			proto.intValue1 = htons(randomInt());
+			proto.intValue2 = htons(randomInt());
+			
+			
+			
+		}
 	
 	//}
-	struct calcMessage* temp = (struct calcMessage*) buf;
-	printf("The msg of protocol:%u %u %u %u %u\n",temp->type,temp->message,temp->protocol,temp->major_version,temp->minor_version);
-
+	
+#ifdef DEBUG
+	printf("DEBUG: PROTOCOL COMPARISION:%d\n",compareProtocol(buf));
+#endif
 
 	/* 
 	Prepare to setup a reoccurring event every 10s. If it_interval, or it_value is omitted, it will be a single alarm 10s after it has been set. 
