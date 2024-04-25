@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <sys/time.h>
 #include <string.h>
+#include <string>
 /* You will to add includes here */
 #include <errno.h>
 #include <sys/types.h>
@@ -12,14 +13,24 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <pthread.h>
+#include <unordered_map>
+#include <vector>
+#include <cmath>
+
+using namespace std;
 // Included to get the support library
 #include <calcLib.h>
 
 #include "protocol.h"
 
 #define MAXBUFLEN 100 
-
+#define RIGHT "OK"
+#define WRONG "NOT OK"
 const struct calcMessage PROTOCOL = {22, 0, 17, 1, 0};
+const struct calcMessage NOTOK_MSG = {htonl(2),htonl(2),htonl(17),htonl(1),htonl(0)};
+const struct calcMessage NOTOK_MSG = {htonl(2),htonl(1),htonl(17),htonl(1),htonl(0)};
+
+vector<string> arith = {"add","div","mul","sub","fadd","fdiv","fmul","fsub"};
 
 using namespace std;
 /* Needs to be global, to be rechable by callback and main */
@@ -27,6 +38,19 @@ int loopCount=0;
 int terminate=0;
 
 static int clientID = 1;
+
+typedef struct Info
+{
+	int sockfd;
+	struct sockaddr_storage their;
+	
+}clientInfo;
+
+//declare functions
+void sendCalcMsg(int sockfd,struct sockaddr_storage their);
+int getArith(char* operand);
+void *get_in_addr(struct sockaddr *sa);
+bool compareProtocol(char* msg);
 
 /* Call back function, will be called when the SIGALRM is raised when the timer expires. */
 void checkJobbList(int signum){
@@ -42,6 +66,21 @@ void checkJobbList(int signum){
   return;
 }
 
+//based on the arith to get the corresponding index of arith in the protocol 
+int getArith(char* operand)
+{
+	unordered_map<string,int>element_index;
+	for(int i = 0; i < arith.size(); i++)
+	{
+		element_index[arith[i]] = i;
+	}
+
+	if(element_index.find(operand) != element_index.end())
+	{
+		return element_index[operand];
+	}
+	return -1;
+}
 
 // get sockaddr, IPv4 or IPv6:
 void *get_in_addr(struct sockaddr *sa)
@@ -56,7 +95,65 @@ void *get_in_addr(struct sockaddr *sa)
 //use thread to handle several clients at a time
 void* handleclients(void* arg)
 {
+	clientInfo* info = (clientInfo*)arg;
+	int sockfd = info->sockfd;
 
+	char buf[MAXBUFLEN];
+	
+	struct sockaddr_storage their_addr = info->their;
+	socklen_t addr_len;
+	addr_len = sizeof(their_addr);
+	
+	int numbytes;
+	
+	memset(buf,0,sizeof(buf));
+		
+	if((numbytes=recvfrom(sockfd,buf,MAXBUFLEN-1,0,(struct sockaddr*)&their_addr,&addr_len)) == -1){
+		perror("recv:error\n");
+		exit(1);
+	}
+
+	char* operand = randomType();
+	
+	//Check if the protocol matches
+	if(!compareProtocol(buf))
+	{
+		sendCalcMsg(sockfd,their_addr);	
+	}else
+	{
+		struct calcProtocol proto;	
+		
+		if(operand[0] == 'f')
+		{
+			proto.arith = htons(getArith(operand));
+			proto.inValue1 = htonl(0);
+			proto.inValue2 = htonl(0);
+			proto.inResult = htonl(0);
+			proto.flValue1 = randomFloat();
+			proto.flValue2 = randomFloat();
+			proto.flResult = 0.0f;
+		}else
+		{
+			proto.arith = htons(getArith(operand));
+			proto.inValue1 = htonl(randomInt());
+			proto.inValue2 = htonl(randomInt());
+			proto.inResult = htonl(0);
+			proto.flValue1 = 0.0f;
+			proto.flValue2 = 0.0f;
+			proto.flResult = 0.0f;
+		
+		}
+		proto.type = htons(1);
+		proto.major_version = htons(1);
+		proto.minor_version = htons(0);
+		proto.id = htonl(clientID++);
+
+		if((numbytes=sendto(sockfd,&proto,sizeof(proto),0,(struct sockaddr*)&their_addr,addr_len)) == -1)
+		{
+			perror("talker:sendto");
+		}
+		
+	}
 
 
 
@@ -77,7 +174,9 @@ bool compareProtocol(char* msg)
 	info.major_version = ntohs(info.major_version);
 	info.minor_version = ntohs(info.minor_version);
 	
-	printf("The msg of protocol:%u %u %u %u %u\n",info.type,info.message,info.protocol,info.major_version,info.minor_version);
+	#ifdef DEBUG
+		printf("The msg of protocol:%u %u %u %u %u\n",info.type,info.message,info.protocol,info.major_version,info.minor_version);
+	#endif
 	
 	if(info.type != PROTOCOL.type || info.message != PROTOCOL.message || info.protocol != PROTOCOL.protocol ||
 	 info.major_version != PROTOCOL.major_version || info.minor_version != PROTOCOL.minor_version)
@@ -211,38 +310,6 @@ int main(int argc, char *argv[]){
 
 	freeaddrinfo(servinfo);
 
-	
-	//while(1)
-	//{
-		memset(buf,0,sizeof(buf));
-	
-		
-		if((numbytes=recvfrom(sockfd,buf,MAXBUFLEN-1,0,(struct sockaddr*)&their_addr,&addr_len)) == -1){
-			perror("recv:error\n");
-			exit(1);
-		}
-
-		//Check if the protocol matches
-		if(!compareProtocol(buf))
-		{
-			sendCalcMsg(sockfd,their_addr);	
-		}else
-		{
-			struct calcProtocol proto;	
-			proto.type = htons(1);
-			proto.major_version = htons(1);
-			proto.minor_version = htons(0);
-			proto.id = htons(clientID++);
-			proto.arith = htons(randomType());
-			proto.intValue1 = htons(randomInt());
-			proto.intValue2 = htons(randomInt());
-			
-			
-			
-		}
-	
-	//}
-	
 #ifdef DEBUG
 	printf("DEBUG: PROTOCOL COMPARISION:%d\n",compareProtocol(buf));
 #endif
@@ -264,7 +331,125 @@ int main(int argc, char *argv[]){
 		printf("DEBUGGER LINE ");
 	#endif
 
-  
+	while(1)
+	{
+		memset(buf,0,sizeof(buf));
+			
+		if((numbytes=recvfrom(sockfd,buf,MAXBUFLEN-1,0,(struct sockaddr*)&their_addr,&addr_len)) == -1){
+			perror("recv:error\n");
+			exit(1);
+		}
+
+		char* operand = randomType();
+		
+		//to check whether the received msg is calcMessage or calcProtocol
+		if(numbytes == sizeof(calcMessage))
+		{
+			//Check if the protocol matches
+			if(!compareProtocol(buf))
+			{
+				sendCalcMsg(sockfd,their_addr);	
+			}else
+			{
+				struct calcProtocol proto;	
+				
+				if(operand[0] == 'f')
+				{
+					proto.arith = htons(getArith(operand));
+					proto.inValue1 = htonl(0);
+					proto.inValue2 = htonl(0);
+					proto.inResult = htonl(0);
+					proto.flValue1 = randomFloat();
+					proto.flValue2 = randomFloat();
+					proto.flResult = 0.0f;
+				}else
+				{
+					proto.arith = htons(getArith(operand));
+					proto.inValue1 = htonl(randomInt());
+					proto.inValue2 = htonl(randomInt());
+					proto.inResult = htonl(0);
+					proto.flValue1 = 0.0f;
+					proto.flValue2 = 0.0f;
+					proto.flResult = 0.0f;
+				
+				}
+				proto.type = htons(1);
+				proto.major_version = htons(1);
+				proto.minor_version = htons(0);
+				proto.id = htonl(clientID++);
+
+				if((numbytes=sendto(sockfd,&proto,sizeof(proto),0,(struct sockaddr*)&their_addr,addr_len)) == -1)
+				{
+					perror("talker:sendto");
+				}
+			}
+		
+		}else
+		{
+			struct calcProtocol proto;
+			
+			memset(&proto,0,sizeof(proto));
+			
+			memcpy(&proto,buf,sizeof(proto));		
+			
+			//simplify the calculation
+			int value1 = ntohl(proto.inValue1);
+			int value2 = ntohl(proto.inValue2);
+			int result = ntohl(proto.inResult);
+			double fvalue1 = proto.flValue1;
+			double fvalue2 = proto.flValue2;
+			double fresult = proto.flResult;
+			
+			bool isEqual;
+			
+			switch (ntohl(proto.arith))
+			{
+				case 1:
+					isEqual = ((value1 + value2 - result) == 0);
+					break;
+				case 2:
+					isEqual = ((value1 - value2 - result) == 0);
+					break;
+				case 3:
+					isEqual = ((value1 * value2 - result) == 0);
+					break;
+				case 4:
+					isEqual = ((value1 / value2 - result) == 0);
+					break;
+				case 5: 
+					isEqual = (fabs(fvalue1 + fvalue2 - fresult) < 0.0001);
+					break;
+				case 6:
+					isEqual = (fabs(fvalue1 - fvalue2 - fresult) < 0.0001);
+					break;
+				case 7:
+					isEqual = (fabs(fvalue1 * fvalue2 - fresult) < 0.0001);	
+					break;
+				case 8:
+					isEqual = (fabs(fvalue1 / fvalue2 - fresult) < 0.0001);
+					break;
+				default:
+					isEqual = false;
+					break;	
+			}
+			
+			if(isEqual)
+			{	
+				
+				memcpy(buf,RIGHT,sizeof(RIGHT));	
+				if((numbytes=sendto(sockfd,&buf,sizeof(buf),0,(struct sockaddr*)&their_addr,addr_len)) == -1)
+				{
+					perror("send error:OK");
+					continue;
+				}else
+				{
+					
+				}
+			}		
+					
+		}			
+	}
+
 	while(terminate==0){
 		printf("This is the main loop, %d time.\n",loopCount);
 		sleep(1);
