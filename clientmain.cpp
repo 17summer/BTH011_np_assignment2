@@ -20,6 +20,12 @@
 #include "protocol.h"
 #define NOCL 10000
 
+int loopcount = 0;
+
+bool flag = false;
+
+
+
 int main(int argc, char *argv[]){
   
   /* Do magic */
@@ -49,9 +55,20 @@ int main(int argc, char *argv[]){
   }
   
   //split input to each parameters.
+  /*
   char delim[]=":";
   char *Desthost=strtok(argv[1],delim);
   char *Destport=strtok(NULL,delim);
+  */
+	char *str = argv[1];
+	char *Desthost = "";
+	char *Destport = "";
+	char *colon_pos = strrchr(str, ':');
+	if (colon_pos != NULL) {
+		*colon_pos = '\0';
+		Desthost = str;
+		Destport = colon_pos + 1;
+	}
   int noClients=atoi(argv[2]);
   int prob=atoi(argv[3]);
 
@@ -72,11 +89,14 @@ int main(int argc, char *argv[]){
     DEBUGv=0;
   }
   
+//DEBUGv =1;
   
+  //store information
   socklen_t addr_len;
   struct sockaddr_storage their_addr;
   addr_len = sizeof(their_addr);
   
+  //write information into file
   printf("Connecting %d clients %s on port=%s \n",noClients,Desthost,Destport);
   printf("Saving to %s \n", argv[4]);
   //open or create the file in "w+" mode.
@@ -85,11 +105,13 @@ int main(int argc, char *argv[]){
     printf("Cant write to %s, %s.\n",argv[4], strerror(errno));
   } 
 
-  
+  //Create a socket descriptor for the number of clients
   memset(&hints, 0, sizeof hints);
   memset(&buffer,0, sizeof(buffer));
   hints.ai_family = AF_UNSPEC;
   hints.ai_socktype = SOCK_DGRAM;
+  
+  printf("%s\n\n\n\n");
   
   if ((rv = getaddrinfo(Desthost, Destport, &hints, &servinfo)) != 0) {
     fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
@@ -103,7 +125,6 @@ int main(int argc, char *argv[]){
 	perror("socket");
 	continue;
       }
-      
       break;
     }
     //    printf("servinfo prt2..\n");
@@ -112,13 +133,14 @@ int main(int argc, char *argv[]){
       return 2;
     }
   }
+	
 
   int s;
   struct sockaddr_in sa;
   socklen_t sa_len=sizeof(sa);
   
   char localIP[32];
-  char *myAdd;
+  const char *myAdd;
   memset(&localIP,0,sizeof(localIP));
   
   int bobsMother = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
@@ -139,7 +161,8 @@ int main(int argc, char *argv[]){
   }
 
   close(bobsMother);
-      
+         
+  //while starting, send the message to server 
   /* Ready to send messages. */
   typedef struct calcMessage cMessage;
   cMessage CM;
@@ -153,6 +176,7 @@ int main(int argc, char *argv[]){
   cProtocol *ptrCM;
   cProtocol CP[NOCL];
   cMessage CMs[NOCL];
+  
   int droppedClient[NOCL];
 
   for(int i=0;i<NOCL;i++){
@@ -172,24 +196,53 @@ int main(int argc, char *argv[]){
   printf("uint16_t = %d \n", sizeof(uint16_t));
   printf("uint32_t = %d \n", sizeof(uint32_t));
   
+  //let each client sends message1 to specific address
+  
+  
+  struct timeval timeout;
+    timeout.tv_sec = 2;  // 设置超时为2秒
+    timeout.tv_usec = 0;
+    
+ /*if (setsockopt(sockfd[i], SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout)) < 0) {
+        perror("setsockopt for receive timeout failed");
+        close(sockfd);
+        return -1;
+    }*/
+ while(1){
   for(int i=0;i<noClients;i++){
+   if (setsockopt(sockfd[i], SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout)) < 0) {
+        perror("setsockopt for receive timeout failed");
+        close(sockfd[i]);
+        return -1;
+    }
+  //for(auto it = status.begin(); it!= status.end();it++){
+    //send data from sockfd[i] to the target addr
+   
     if ((numbytes = sendto(sockfd[i], &CM, sizeof(CM), 0,p->ai_addr, p->ai_addrlen)) == -1) {
       perror("talker: sendto");
       if(fptr!=NULL)
 	fprintf(fptr,"ERROR OCCURED");    
       exit(1);
     } else {
+      
+      //Debug the message information
+      //printf("%u %u %u %u %u\n", ntohs(CM.type),ntohl(CM.message),ntohs(CM.major_version),ntohs(CM.minor_version),ntohs(CM.protocol));
+
       if( (s=getsockname(sockfd[i],(struct sockaddr*)&sa,&sa_len) == -1) ){
 	perror("getsockname failed.");
       }else {
 	printf("Client[%d] (%s:%d) registered, sent %d bytes\n",i,localIP,ntohs(sa.sin_port),numbytes);
       }
     }
-  }
 
+  }
+	
+	
   printf("\n-----RESPONSES to calcMessage (registration) ----- \n");
   
-  for(int i=0;i<noClients;i++){
+  //for each client
+  //for(auto it = status.begin(); it!= status.end();it++){
+   for(int i=0;i<noClients;i++){
     //receive data from sockfd[i] and store it into buffer
     if ((numbytes = recvfrom(sockfd[i], buffer, sizeof(buffer), 0,(struct sockaddr*)&their_addr,&addr_len)) == -1) {
       perror("recvfrom");
@@ -197,50 +250,74 @@ int main(int argc, char *argv[]){
 	fprintf(fptr,"ERROR OCCURED");    
       exit(1);
     } else {
-      //      printf("Client[%d] received %d bytes \n",i,numbytes);
+//    printf("Client[%d] received %d bytes \n",i,numbytes);
+      //DEBUG
+      //printf("MSG: %s\n",buffer);
       printf("Client[%d] ",i);
     }
+    
+
+    
+     if (numbytes == -1) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            printf("Receive timeout occurred.Client[%d] Need to retransport.\n",i);
+            continue;
+        }
+    }
+	
+    
     /* read info */
     /* Copy to internal structure */
     if (numbytes == sizeof(cProtocol)){
       memcpy(&CP[i],buffer, sizeof(cProtocol));
       printf("| calcProtocol type=%d version=%d.%d id=%d arith=%d ",ntohs(CP[i].type),ntohs(CP[i].major_version),ntohs(CP[i].minor_version),ntohl(CP[i].id), ntohl(CP[i].arith));
       switch(ntohl(CP[i].arith)){
-      case 1:
-	printf(" add \n");
-	break;
-      case 2:
-	printf(" sub \n");
-	break;
-      case 3:
-	printf(" mul \n");
-	break;
-      case 4:
-	printf(" div \n");
-	break;
-      case 5:
-	printf(" fadd \n");
-	break;
-      case 6:
-	printf(" fsub \n");
-	break;
-      case 7:
-	printf(" fmul \n");
-	break;
-      case 8:
-	printf(" fdiv \n");
-	break;
-      }
+	case 1:
+		printf(" add \n");
+		break;
+	case 2:
+		printf(" sub \n");
+		break;
+	case 3:
+		printf(" mul \n");
+		break;
+	case 4:
+		printf(" div \n");
+		break;
+	case 5:
+		printf(" fadd \n");
+		break;
+	case 6:
+		printf(" fsub \n");
+		break;
+	case 7:
+		printf(" fmul \n");
+		break;
+	case 8:
+		printf(" fdiv \n");
+		break;
+	}
       
       printf("\t  | inVal1=%d inVal2=%d inRes=%d inFloat1=%g inFloat2=%g flValue=%g \n",ntohl(CP[i].inValue1),ntohl(CP[i].inValue2),ntohl(CP[i].inResult),CP[i].flValue1,CP[i].flValue2,CP[i].flResult);
-    } else {
+    } 
+    //print if the protocol is not matched.
+    else {
       printf("\t  | ODD SIZE MESSAGE. Got %d bytes, expected %d bytes (sizeof(cProtocol)) . \n",numbytes, sizeof(cProtocol));
       droppedClient[i]==-1; // Signal that this client is busted.
       ERRORresults++;
       ERRORsignup++;
     }
-   
-  }
+    
+  }  sleep(2);
+	loopcount+=2;
+	if(loopcount % 6 ==0)
+	{
+		break;
+	}
+ }
+  
+  
+  
   printf("\nWaiting 4s \n");
   sleep(4);
 
@@ -249,9 +326,11 @@ int main(int argc, char *argv[]){
   
   printf("Doing Calculations .\n\n");
   for(int i=0;i<noClients;i++){
+    //if the client has busted, do not do any calculation
     if (droppedClient[i]==-1) {
       continue;
     }
+    //based on the arith in proto, do corresponding calculation
     switch(ntohl(CP[i].arith)){
     case 1: /*add */
       CP[i].inResult=htonl(ntohl(CP[i].inValue1)+ntohl(CP[i].inValue2));
@@ -291,8 +370,10 @@ int main(int argc, char *argv[]){
       break;
     }
     
+    //client to server
     CP[i].type=htons(2);
 
+    //set the value of myRand, if myRand less than prob, the client is dropped.
     myRand=rand()%100;
     if( (s=getsockname(sockfd[i],(struct sockaddr*)&sa,&sa_len) == -1) ){
       perror("getsockname failed.");
@@ -316,7 +397,8 @@ int main(int argc, char *argv[]){
 	printf("\tCP.inValue1= %d CP.inValue2= %d CP.inResult= %d \n ", ntohl(CP[i].inValue1), ntohl(CP[i].inValue2), ntohl(CP[i].inResult));
 	printf("\tCP.flValue1= %g CP.flValue2= %g CP.flResult= %g \n", CP[i].flValue1, CP[i].flValue2, CP[i].flResult); 
     }
-	
+    
+    //send the protocol back to server, while calculation is done.
     if ((numbytes = sendto(sockfd[i], &CP[i], sizeof(cProtocol), 0,p->ai_addr, p->ai_addrlen)) == -1) {
       perror("talker: sendto");
       if(fptr!=NULL)
@@ -330,6 +412,8 @@ int main(int argc, char *argv[]){
       }
     }
   }
+  
+  //hope to receive response
   printf("Reading server response, expecting %d replies .\n", noClients-dropped);
   struct timeval tv;
 
@@ -345,7 +429,7 @@ int main(int argc, char *argv[]){
       printf("Client %d (id = %d ) was dropped \n", i, ntohl(CP[i].id));
       continue;
     }
-    
+    //if time out 
     setsockopt(sockfd[i],SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);   
     if ((numbytes = recvfrom(sockfd[i], buffer, sizeof(buffer), 0,(struct sockaddr*)&their_addr,&addr_len)) == -1) {
       printf("Client %d (id = %d ) : (%d) %s \n", i, ntohl(CP[i].id), errno, strerror(errno));
@@ -408,6 +492,8 @@ int main(int argc, char *argv[]){
       break;
     }
 
+
+    //check out the arith and print the corresponding formulation
     switch(ntohl(CP[i].arith)){
     case 1: /*add */
       CP[i].inResult=htonl(ntohl(CP[i].inValue1)+ntohl(CP[i].inValue2));
@@ -449,7 +535,8 @@ int main(int argc, char *argv[]){
     
     printf("\n");
   }
-  
+
+  //calculations done
   printf("Done, with good clients.\n");
 
 
@@ -470,145 +557,145 @@ int main(int argc, char *argv[]){
     }
   }
 
-  char myMsg[]="TEXT UDP 1.0";
+	  char myMsg[]="TEXT UDP 1.0";
 
-  //  printf("bob\n");
-  gettimeofday(&ct1, NULL);
-  //  printf("alice\n");
+	  //  printf("bob\n");
+	  gettimeofday(&ct1, NULL);
+	  //  printf("alice\n");
 
-  printf("Client will 'connect', and send a text string (rubbish). \n");
-  printf("Server should reply with an ERROR indicated.\n");
-  
-  printf("Client[X] ");
-  if ((numbytes = sendto(bobsMother, &myMsg, strlen(myMsg), 0,p->ai_addr, p->ai_addrlen)) == -1) {
-    perror("talker: sendto");
-    if(fptr!=NULL)
-      fprintf(fptr,"ERROR OCCURED");    
-    exit(1);
-  } else {
-    if( (s=getsockname(bobsMother,(struct sockaddr*)&sa,&sa_len) == -1) ){
+	  printf("Client will 'connect', and send a text string (rubbish). \n");
+	  printf("Server should reply with an ERROR indicated.\n");
+	  
+	  printf("Client[X] ");
+	  if ((numbytes = sendto(bobsMother, &myMsg, strlen(myMsg), 0,p->ai_addr, p->ai_addrlen)) == -1) {
+	    perror("talker: sendto");
+	    if(fptr!=NULL)
+	      fprintf(fptr,"ERROR OCCURED");    
+	    exit(1);
+	  } else {
+	    if( (s=getsockname(bobsMother,(struct sockaddr*)&sa,&sa_len) == -1) ){
 
-      perror("getsockname failed.");
-    }else {
-      printf("%s:%d sent %d bytes\n",localIP,ntohs(sa.sin_port),numbytes);
-    }
-  }
+	      perror("getsockname failed.");
+	    }else {
+	      printf("%s:%d sent %d bytes\n",localIP,ntohs(sa.sin_port),numbytes);
+	    }
+	  }
 
-  setsockopt(bobsMother,SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);   
-  if ((numbytes = recvfrom(bobsMother, buffer, sizeof(buffer), 0,(struct sockaddr*)&their_addr,&addr_len)) == -1) {
-    printf("Client[X] Error (%d) %s \n", errno, strerror(errno));
-    if (errno == ETIMEDOUT ) {
-      printf("Client[X] timedout.\n");
-    } 
-  } else {
-    printf("Client[X] expecting %d or %d bytes.\n", sizeof(cMessage), sizeof(cProtocol));
-    printf("Client[X] got %d bytes, ",numbytes);
-  }
-  gettimeofday(&ct2, 0);
-  //  printf("seconds : %ld\nmicro seconds : %ld", ct2.tv_sec, ct2.tv_usec);
-  double tv1,tv2;
-  tv2=(double)ct2.tv_sec+(double)(ct2.tv_usec)/1000000;
-  tv1=(double)ct1.tv_sec+(double)(ct1.tv_usec)/1000000;  
-  printf("within %g [us].\n", (tv2-tv1)*1000*1000);
+	  setsockopt(bobsMother,SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);   
+	  if ((numbytes = recvfrom(bobsMother, buffer, sizeof(buffer), 0,(struct sockaddr*)&their_addr,&addr_len)) == -1) {
+	    printf("Client[X] Error (%d) %s \n", errno, strerror(errno));
+	    if (errno == ETIMEDOUT ) {
+	      printf("Client[X] timedout.\n");
+	    } 
+	  } else {
+	    printf("Client[X] expecting %d or %d bytes.\n", sizeof(cMessage), sizeof(cProtocol));
+	    printf("Client[X] got %d bytes, ",numbytes);
+	  }
+	  gettimeofday(&ct2, 0);
+	  //  printf("seconds : %ld\nmicro seconds : %ld", ct2.tv_sec, ct2.tv_usec);
+	  double tv1,tv2;
+	  tv2=(double)ct2.tv_sec+(double)(ct2.tv_usec)/1000000;
+	  tv1=(double)ct1.tv_sec+(double)(ct1.tv_usec)/1000000;  
+	  printf("within %g [us].\n", (tv2-tv1)*1000*1000);
 
-  int badCproblem=0;
-  
-  if (numbytes == sizeof(cMessage)){
-      memcpy(&CM,buffer, sizeof(cMessage));
-      switch(ntohs(CM.type)){
-      case 1:
-	printf("S->C [ascii] (wrong)");
-	badCproblem++;
-	break;
-      case 2:
-	printf("S->C [binary] (correct)");
-	break;
-      case 3:
-	printf("S->C [N/A] (wrong)");
-	badCproblem++;
-	break;
-      case 4:
-	printf("C->S [ascii] (wrong)");
-	badCproblem++;
-	break;
-      case 5:
-	printf("C->S [binary] (wrong)");
-	badCproblem++;
-	break;
-      case 6:
-	printf("C->S [N/A] (wrong)");
-	badCproblem++;
-	break;
-      default:
-	printf(" unknown type=%d ", ntohs(CM.type));
-	badCproblem++;
-	break;
-      }
-      
-      printf("version=%d.%d ", ntohs(CM.major_version),ntohs(CM.minor_version));
-      switch( ntohl(CM.message)) {
-      case 0:
-	printf(" N/A  (wrong)");
-	badCproblem++;
-	break;
-      case 1:
-	printf(" OK (wrong)");
-	badCproblem++;
-	break;
-      case 2:
-	printf(" Not OK (correct)");
-	break;
-      default:
-	printf("Unknown msg = %d (wrong)", ntohl(CM.message));
-	badCproblem++;
-	break;
-      }
-  } else if (numbytes == sizeof(cProtocol)){
-    printf("Client[X] got a cProtocol, ");
-    memcpy(&CP[0],buffer, sizeof(cProtocol));
-    printf(" type = %d \n", ntohs(CP[0].type));
-    badCproblem++;
-  } else {    
-    printf("Client[X] got not the size that I expected.\n");
-  }
-  printf("\nDone with BAD clients.\n");
-  if (badCproblem>0){
-    printf("%d issues with bad clients.\n", badCproblem);
-    printf("see the log above if it was type, message or both.\n");
-  }
-  ERRORresults+=badCproblem;
-      
-    
-  close(bobsMother);
+	  int badCproblem=0;
+	  
+	  if (numbytes == sizeof(cMessage)){
+	      memcpy(&CM,buffer, sizeof(cMessage));
+	      switch(ntohs(CM.type)){
+	      case 1:
+		printf("S->C [ascii] (wrong)");
+		badCproblem++;
+		break;
+	      case 2:
+		printf("S->C [binary] (correct)");
+		break;
+	      case 3:
+		printf("S->C [N/A] (wrong)");
+		badCproblem++;
+		break;
+	      case 4:
+		printf("C->S [ascii] (wrong)");
+		badCproblem++;
+		break;
+	      case 5:
+		printf("C->S [binary] (wrong)");
+		badCproblem++;
+		break;
+	      case 6:
+		printf("C->S [N/A] (wrong)");
+		badCproblem++;
+		break;
+	      default:
+		printf(" unknown type=%d ", ntohs(CM.type));
+		badCproblem++;
+		break;
+	      }
+	      
+	      printf("version=%d.%d ", ntohs(CM.major_version),ntohs(CM.minor_version));
+	      switch( ntohl(CM.message)) {
+	      case 0:
+		printf(" N/A  (wrong)");
+		badCproblem++;
+		break;
+	      case 1:
+		printf(" OK (wrong)");
+		badCproblem++;
+		break;
+	      case 2:
+		printf(" Not OK (correct)");
+		break;
+	      default:
+		printf("Unknown msg = %d (wrong)", ntohl(CM.message));
+		badCproblem++;
+		break;
+	      }
+	  } else if (numbytes == sizeof(cProtocol)){
+	    printf("Client[X] got a cProtocol, ");
+	    memcpy(&CP[0],buffer, sizeof(cProtocol));
+	    printf(" type = %d \n", ntohs(CP[0].type));
+	    badCproblem++;
+	  } else {    
+	    printf("Client[X] got not the size that I expected.\n");
+	  }
+	  printf("\nDone with BAD clients.\n");
+	  if (badCproblem>0){
+	    printf("%d issues with bad clients.\n", badCproblem);
+	    printf("see the log above if it was type, message or both.\n");
+	  }
+	  ERRORresults+=badCproblem;
+	      
+	    
+	  close(bobsMother);
 
-  printf("SUMMARY Tested:%d Dropped:%d OK:%d ERROR:%d BAD:%d",noClients,dropped, OKresults,ERRORresults,badCproblem);
+	  printf("SUMMARY Tested:%d Dropped:%d OK:%d ERROR:%d BAD:%d",noClients,dropped, OKresults,ERRORresults,badCproblem);
 
-  double errorRatio = 100.0;
-  if (ERRORresults>0){
-    errorRatio = (double)(ERRORresults)/(double)(noClients-dropped);
-    //    printf("Calcs ratio = %8.8g \n", errorRatio);
-  } else {
-    errorRatio = 0;
-  }
-  
-  if(errorRatio>0.1) {
-    printf(" ErrorRatio is to high (%g > 0.1) \n",errorRatio);
-  } else {
-    printf(" ErrorRatio is fine (%g < 0.1) \n",errorRatio);
-  }
-  
+	  double errorRatio = 100.0;
+	  if (ERRORresults>0){
+	    errorRatio = (double)(ERRORresults)/(double)(noClients-dropped);
+	    //    printf("Calcs ratio = %8.8g \n", errorRatio);
+	  } else {
+	    errorRatio = 0;
+	  }
+	  
+	  if(errorRatio>0.1) {
+	    printf(" ErrorRatio is to high (%g > 0.1) \n",errorRatio);
+	  } else {
+	    printf(" ErrorRatio is fine (%g < 0.1) \n",errorRatio);
+	  }
+	  
 
-  if(fptr!=NULL)
-    fprintf(fptr,"Tested:%d Dropped:%d OK:%d ERROR:%d ErrorRatio:%g BAD:%d\n",noClients,dropped, OKresults,ERRORresults, errorRatio,badCproblem);
+	  if(fptr!=NULL)
+	    fprintf(fptr,"Tested:%d Dropped:%d OK:%d ERROR:%d ErrorRatio:%g BAD:%d\n",noClients,dropped, OKresults,ERRORresults, errorRatio,badCproblem);
 
-  if(fptr!=NULL)
-    fclose(fptr);
-    
-  
-  
-  if(ERRORresults == 0){
-    printf("SUMMARY: PASSED!\n");
-  } else {
-    printf("SUMMARY: FAILED!\n");
-  }
+	  if(fptr!=NULL)
+	    fclose(fptr);
+	    
+	  
+	  
+	  if(ERRORresults == 0){
+	    printf("SUMMARY: PASSED!\n");
+	  } else {
+	    printf("SUMMARY: FAILED!\n");
+	  }
 }
