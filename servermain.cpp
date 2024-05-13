@@ -1,4 +1,4 @@
-#include <stdio.h>
+#include <stdio.h>	
 #include <stdlib.h>
 #include <signal.h>
 #include <unistd.h>
@@ -28,6 +28,7 @@ using namespace std;
 #define MAXBUFLEN 100 
 #define RIGHT "OK"
 #define WRONG "NOT OK"
+#define UPROTOCOL "TEXT UDP 1.0"
 const struct calcMessage PROTOCOL = {22, 0, 17, 1, 0};
 const struct calcMessage NOTOK_MSG = {htons(2),htonl(2),htonl(17),htons(1),htons(0)};
 const struct calcMessage OK_MSG = {htons(2),htonl(1),htonl(17),htons(1),htons(0)};
@@ -39,17 +40,19 @@ std::map<int,int> clientStatus;
 
 using namespace std;
 /* Needs to be global, to be rechable by callback and main */
-int loopCount=0;
+/*
 int terminate=0;
-
+*/
 int clientID = 1;
+int loopCount=0;
 
 typedef struct Info
 {
-	int sockfd;
-	struct sockaddr_storage their;
-	
+	char* addr;
+	int port;
 }clientInfo;
+
+map<int,clientInfo> CI;
 
 //declare functions
 int getArith(char* operand);
@@ -66,15 +69,22 @@ void checkJobbList(int signum){
 		//if timeout, delete the assig.
 		if(it->second >=10)
 		{
+			for(auto i = CI.begin();i != CI.end();i++)
+			{
+				if(i->first == it->first)
+				{
+					printf("Client[%d] ip[%s] port[%d] is timeout. Lost.\n",it->first,i->second.addr,i->second.port); 
+				}
+			}
 			it = clientStatus.erase(it);
 		}else
 		{
 			it++;
 		}
 	}
+	printf("This is the main loop %d\n",loopCount);
 
-
-
+	loopCount++;
   //printf("Let me be, I want to sleep, loopCount = %d.\n", loopCount);
 
   /*if(loopCount>20){
@@ -126,7 +136,7 @@ bool compareProtocol(char* msg)
 	info.minor_version = ntohs(info.minor_version);
 	
 	#ifdef DEBUG
-		printf("The msg of protocol:%d %d %d %d %d\n",info.type,info.message,info.protocol,info.major_version,info.minor_version);
+		//printf("The msg of protocol:%d %d %d %d %d\n",info.type,info.message,info.protocol,info.major_version,info.minor_version);
 	#endif
 	
 	if(info.type != PROTOCOL.type || info.message != PROTOCOL.message || info.protocol != PROTOCOL.protocol ||
@@ -177,7 +187,6 @@ int main(int argc, char *argv[]){
 	int sockfd;
 	struct addrinfo hints, *servinfo, *p;
 	int rv;
-	int yes = 1;
 	int numbytes;
 	struct sockaddr_storage their_addr;
 	struct sockaddr_in *the_addr;
@@ -217,12 +226,6 @@ int main(int argc, char *argv[]){
 			continue;
 		}
 		
-		//Allows reuse of socket addresses in TIME_WAIT state when binding addresses
-		if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
-		    perror("setsockopt");
-		    exit(1);
-		}
-		
 		/* up to this point its similar as client */ 
 		if (bind(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
 			close(sockfd);
@@ -245,28 +248,7 @@ int main(int argc, char *argv[]){
 	printf("DEBUG: PROTOCOL COMPARISION:%d\n",compareProtocol(buf));
 #endif
 
-
-
-
-
-
-
-
-
 //Main Code Part
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
  	/* 
@@ -286,7 +268,6 @@ int main(int argc, char *argv[]){
 		printf("DEBUGGER LINE ");
 	#endif
 
-
 	struct calcProtocol proto;
 	while(1)
 	{
@@ -305,8 +286,7 @@ int main(int argc, char *argv[]){
 		inet_ntop(their_addr.ss_family,get_in_addr((struct sockaddr*)clientAddrInfo),clientIP,sizeof(clientIP));
 		int clientPort = ntohs(clientAddrInfo->sin_port);
 
-		printf("Server receive from ip %s and port %d.\n",clientIP,clientPort);
-
+		clientInfo info = {clientIP,clientPort};
 
 		char* operand = randomType();
 		
@@ -320,16 +300,21 @@ int main(int argc, char *argv[]){
 			{
 				//reset the char array.
 				memset(buf,0,sizeof(buf));
-				
 				if((numbytes = sendto(sockfd,&NOTOK_MSG,sizeof(NOTOK_MSG),0,(struct sockaddr*)&their_addr,addr_len)) == -1)
 				{
 					perror("error:sendto\n");
 				}
-				printf("Message sent by client is not suitable......\n");
+				continue;
 			}
 			//protocol right
 			else
 			{		
+				//record client status
+				clientStatus.insert(pair<int,int>(clientID,0));
+				CI.insert(pair<int,clientInfo>(clientID,info));
+				
+				printf("Server receive client[%d] from ip[%s] and port[%d].\n",clientID,clientIP,clientPort);
+				
 				if(operand[0] == 'f')
 				{
 					proto.arith = htonl(getArith(operand));
@@ -339,7 +324,7 @@ int main(int argc, char *argv[]){
 					proto.flValue1 = randomFloat();
 					proto.flValue2 = randomFloat();
 					proto.flResult = 0.0f;
-					printf("The operand: %s , %d , fa1 %lf , fa2 %lf\n",operand,ntohl(proto.arith),proto.flValue1,proto.flValue2);
+					printf("The operand of client[%d]: %s , %d , fa1 %lf , fa2 %lf\n\n",clientID,operand,ntohl(proto.arith),proto.flValue1,proto.flValue2);
 				}else
 				{
 					proto.arith = htonl(getArith(operand));
@@ -349,7 +334,7 @@ int main(int argc, char *argv[]){
 					proto.flValue1 = 0.0f;
 					proto.flValue2 = 0.0f;
 					proto.flResult = 0.0f;
-					printf("The operand: %s , %d , ia1 %d , ia2 %d\n",operand,ntohl(proto.arith),ntohl(proto.inValue1),ntohl(proto.inValue2));
+					printf("The operand of client[%d]: %s , %d , ia1 %d , ia2 %d\n\n",clientID,operand,ntohl(proto.arith),ntohl(proto.inValue1),ntohl(proto.inValue2));
 				}
 				
 				proto.type = htonl(1);
@@ -357,24 +342,24 @@ int main(int argc, char *argv[]){
 				proto.minor_version = htonl(0);
 				proto.id = htonl(clientID);
 				
-				//record client status
-				clientStatus.insert(pair<int,int>(clientID,0));
-				
 				clientID++;
 				
+		
 				if((numbytes=sendto(sockfd,&proto,sizeof(proto),0,(struct sockaddr*)&their_addr,addr_len)) == -1)
 				{
-					perror("error:sendt\n");
+					perror("error:sendto\n");
 				}
 			}
 		
-		}else
+		}else if(numbytes == sizeof(calcProtocol))
 		{		
 			bool flag = false;
 			
 			memset(&proto,0,sizeof(proto));
 			
 			memcpy(&proto,buf,sizeof(proto));		
+			
+			printf("Receive calcProtocol from client[%d] ip[%s] and port[%d].\n",ntohl(proto.id),clientIP,clientPort);                
 			
 			//check out the correctness of client ID 
 			for(auto it = clientStatus.begin(); it != clientStatus.end(); it++)
@@ -396,7 +381,7 @@ int main(int argc, char *argv[]){
 				{
 					perror("error:sendto\n");
 				}
-				printf("Client is rejected......\n");
+				printf("REJECTED. Client[%d] ip[%s] port[%d] is LOST or not in the client status.\n",ntohl(proto.id),clientIP,clientPort);
 				continue;
 			}
 			
@@ -455,6 +440,7 @@ int main(int argc, char *argv[]){
 					perror("send error:OK");
 					continue;
 				}
+				printf("Client[%d] ip[%s] port[%d] answer OK.\n",ntohl(proto.id),clientIP,clientPort);
 				//printf("++++++++++++++++++++++++++++++++++++++++++++++++++++++\n");
 			}else
 			{
@@ -464,11 +450,19 @@ int main(int argc, char *argv[]){
 					perror("send error:NOTOK");
 					continue;
 				}
+				printf("Client[%d] ip[%s] port[%d] answer NOTOK.\n",ntohl(proto.id),clientIP,clientPort);
 				//printf("------------------------------------------------------\n");
 			}	
 			clientStatus.erase(ntohl(proto.id));
-					
-		}			
+			printf("Client[%d] ip[%s] port[%d] is finished.\n\n",ntohl(proto.id),clientIP,clientPort);  
+		}else
+		{
+			if(buf == UPROTOCOL)
+			{
+				printf("Receive the \'TEXT UDP 1.0\' protocol.\n");
+				break;
+			}
+		}		
 	
 		//derelict 
 		/*while(terminate==0){
