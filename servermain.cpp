@@ -85,13 +85,7 @@ void checkJobbList(int signum){
 	printf("This is the main loop %d\n",loopCount);
 
 	loopCount++;
-  //printf("Let me be, I want to sleep, loopCount = %d.\n", loopCount);
 
-  /*if(loopCount>20){
-    printf("I had enough.\n");
-    terminate=1;
-  }*/
-  
   return;
 }
 
@@ -442,7 +436,6 @@ int main(int argc, char *argv[]){
 					continue;
 				}
 				printf("Client[%d] ip[%s] port[%d] answer OK.\n",ntohl(proto.id),clientIP,clientPort);
-				//printf("++++++++++++++++++++++++++++++++++++++++++++++++++++++\n");
 			}else
 			{
 				memcpy(buf,&NOTOK_MSG,sizeof(NOTOK_MSG));	
@@ -452,7 +445,6 @@ int main(int argc, char *argv[]){
 					continue;
 				}
 				printf("Client[%d] ip[%s] port[%d] answer NOTOK.\n",ntohl(proto.id),clientIP,clientPort);
-				//printf("------------------------------------------------------\n");
 			}	
 			clientStatus.erase(ntohl(proto.id));
 			printf("Client[%d] ip[%s] port[%d] is finished.\n\n",ntohl(proto.id),clientIP,clientPort);  
@@ -465,12 +457,6 @@ int main(int argc, char *argv[]){
 			}
 		}		
 	
-		//derelict 
-		/*while(terminate==0){
-			printf("This is the main loop, %d time.\n",loopCount);
-			sleep(1);
-			loopCount++;
-		}*/
 	}
 
 	printf("done.\n");
