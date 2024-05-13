@@ -13,7 +13,9 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <sys/time.h>
+#include <map>
 
+using namespace std;
 
 #define DEBUG
 
@@ -199,23 +201,35 @@ int main(int argc, char *argv[]){
   //let each client sends message1 to specific address
   
   
-  struct timeval timeout;
-    timeout.tv_sec = 2;  // 设置超时为2秒
-    timeout.tv_usec = 0;
+
     
- /*if (setsockopt(sockfd[i], SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout)) < 0) {
-        perror("setsockopt for receive timeout failed");
-        close(sockfd);
-        return -1;
-    }*/
+    
+    
+  int max_retries = 3; // 最大重传次数
+  int retry_count_send[noClients] = {0}; 
+  int retry_count_send2[noClients] = {0};
+  map<int,int> records; 
+  
+	for(int i = 0 ; i < noClients; i++)
+	{
+		records.insert(pair<int,int>(i+1,0));
+	}
+	
+
+  
  while(1){
   for(int i=0;i<noClients;i++){
-   if (setsockopt(sockfd[i], SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout)) < 0) {
-        perror("setsockopt for receive timeout failed");
-        close(sockfd[i]);
-        return -1;
-    }
-  //for(auto it = status.begin(); it!= status.end();it++){
+	
+	std::map<int, int>::iterator it = records.find(i + 1);
+	//if the client dose not need retry
+	if (it != records.end()) {
+        	if(it->second == 1)
+                	continue;
+	}else
+	{
+		printf("some error in find client.\n");
+	}
+  	
     //send data from sockfd[i] to the target addr
    
     if ((numbytes = sendto(sockfd[i], &CM, sizeof(CM), 0,p->ai_addr, p->ai_addrlen)) == -1) {
@@ -241,31 +255,47 @@ int main(int argc, char *argv[]){
   printf("\n-----RESPONSES to calcMessage (registration) ----- \n");
   
   //for each client
-  //for(auto it = status.begin(); it!= status.end();it++){
    for(int i=0;i<noClients;i++){
+   	struct timeval timeout; 
+	timeout.tv_sec = 2;  // set time out time
+	timeout.tv_usec = 0;
+	
+   if (setsockopt(sockfd[i], SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout)) < 0) {
+        perror("setsockopt for receive timeout failed");
+        close(sockfd[i]);
+        return -1;
+    }
+    
+    numbytes = recvfrom(sockfd[i], buffer, sizeof(buffer), 0,(struct sockaddr*)&their_addr,&addr_len);
     //receive data from sockfd[i] and store it into buffer
-    if ((numbytes = recvfrom(sockfd[i], buffer, sizeof(buffer), 0,(struct sockaddr*)&their_addr,&addr_len)) == -1) {
-      perror("recvfrom");
-      if(fptr!=NULL)
-	fprintf(fptr,"ERROR OCCURED");    
-      exit(1);
-    } else {
-//    printf("Client[%d] received %d bytes \n",i,numbytes);
+    if (numbytes == -1) {
+    	if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                    // timeout, need to retry
+                    if (retry_count_send[i] < max_retries) {
+                        printf("Receive timeout occurred. Client[%d] Need to retransmit.\n", i);
+                        retry_count_send[i]=retry_count_send[i]+1;
+                        continue;
+                    } else {
+                        printf("Max retries exceeded for Client[%d]. Aborting.\n", i);
+        	        droppedClient[i]=-1;
+      			dropped++;
+                        // hanlde the situation that exceed maximum times.
+           	      perror("recvfrom");
+		      if(fptr!=NULL)
+			fprintf(fptr,"ERROR OCCURED");                  
+                                           
+                    }
+    
+  
+    } 
+    }else {
+    printf("Client[%d] received %d bytes \n",i,numbytes);
       //DEBUG
       //printf("MSG: %s\n",buffer);
+      
+      records[i+1] = 1;
       printf("Client[%d] ",i);
-    }
-    
-
-    
-     if (numbytes == -1) {
-        if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            printf("Receive timeout occurred.Client[%d] Need to retransport.\n",i);
-            continue;
-        }
-    }
-	
-    
+    }   
     /* read info */
     /* Copy to internal structure */
     if (numbytes == sizeof(cProtocol)){
@@ -308,14 +338,47 @@ int main(int argc, char *argv[]){
       ERRORsignup++;
     }
     
-  }  sleep(2);
-	loopcount+=2;
-	if(loopcount % 6 ==0)
-	{
-		break;
-	}
- }
+  }  
+
+  	
+  	bool flag = true;
+  	for(std::map<int, int>::iterator it = records.begin();it != records.end(); it++)
+  	{
+  		//printf("%d\t",it->second);
+  	
+  		if(it->second == 0)
+  		{
+  			flag = false;
+  			break;
+  		}
+  	}
   
+  	printf("\n");
+  
+ 	if(flag)
+		break;
+ 	
+	bool flagretry = false;
+
+	for(int i = 0 ; i < noClients;i++)
+	{
+		if(retry_count_send[i] == 3)
+		{
+			flagretry = true;
+			break;
+		}
+	}
+
+	if(flagretry)
+		break;
+ 
+
+ 
+// sleep(10);
+ 
+ }
+ 
+ 
   
   
   printf("\nWaiting 4s \n");

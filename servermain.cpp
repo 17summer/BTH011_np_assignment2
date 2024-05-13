@@ -278,7 +278,8 @@ int main(int argc, char *argv[]){
 			perror("recv:error\n");
 			exit(1);
 		}
-			
+		
+		
 		//output client's info to terminal
 		struct sockaddr_in* clientAddrInfo;
 		char clientIP[INET_ADDRSTRLEN];
